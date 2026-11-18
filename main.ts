@@ -16,7 +16,8 @@
 //     random-walk spread) hedges against the ratio model over-shooting on a
 //     single unseen launch, and a 3-point moving average smooths the
 //     quantile curves across adjacent hours.
-//   - Fallback: an hour with fewer than 5 donors uses the house baseline.
+//   - Fallback: an hour with no donors at all uses the house baseline; a thin
+//     donor pool (fewer than 5) still informs the centre but takes the widest spread.
 // LOO results on the kit's comparables: baseline 0.930 mean pinball loss,
 // this model 0.806; on the 9 console-first rolling-midnight launches most
 // like GTA VI (the honest proxy for the final): baseline 0.393, this model
@@ -97,7 +98,10 @@ const releaseDay = (c: Comparable): Map<number, number> => {
 const baselineQuantiles = (p1: number, h: number): number[] =>
   Z.map((z) => Math.max(1, round2(p1 * Math.exp(z * BASE_SIGMA * Math.sqrt(h - 1)))));
 
-/** Ratio-model quantiles for one hour from the donor pool. */
+/** Ratio-model quantiles for one hour from the donor pool. With fewer than
+ *  MIN_DONORS donors the ratios still inform the centre, but the spread is
+ *  widened to the cap: a thin donor pool is honest uncertainty, not
+ *  precision. With no donors at all, fall back to the house baseline. */
 const ratioQuantiles = (
   p1: number,
   donors: Array<{ logRatios: Map<number, number>; weight: number }>,
@@ -108,11 +112,14 @@ const ratioQuantiles = (
     const lr = d.logRatios.get(h);
     if (lr !== undefined) pairs.push([lr, d.weight]);
   }
-  if (pairs.length < MIN_DONORS) return null;
+  if (pairs.length === 0) return null;
   const med = wQuantile(pairs, 0.5);
   const q25 = wQuantile(pairs, 0.25);
   const q75 = wQuantile(pairs, 0.75);
-  const sd = Math.min(SD_CAP, Math.max(0.05, (q75 - q25) / 1.349));
+  const sd =
+    pairs.length < MIN_DONORS
+      ? SD_CAP
+      : Math.min(SD_CAP, Math.max(0.05, (q75 - q25) / 1.349));
   return Z.map((z) => Math.max(1, p1 * Math.exp(med + z * sd)));
 };
 
